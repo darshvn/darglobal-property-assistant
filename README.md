@@ -68,14 +68,28 @@ This matters more than it looks: an LLM grading another LLM agrees with
 confident prose, and confident prose about a price that doesn't exist is the
 failure mode that costs a property business real money.
 
-`--data` audits the scraped table before any of that, because a wrong price in
-an answer is usually not a model problem. It confirms no page carried more
-than one price (so the extractor can't have grabbed a neighbouring listing's
-figure) and lists price-per-sqm outliers. Ten of the 53 listings are outliers,
-all of them Jeddah apartments where Wasalt publishes the building's built-up
-area rather than the unit's, plus one plot listed at 460,000 SAR per sqm.
-Those are reported and left exactly as published. Quietly "correcting" a
-source figure is how a dataset starts lying.
+`--data` audits the scraped table before any of that, because a wrong figure
+in an answer is usually not a model problem. It checks three things: that no
+page carried more than one price (so the extractor can't have taken a
+neighbouring listing's), that every stored city actually appears on that
+listing's own page, and which price-per-sqm figures are outliers.
+
+The city check exists because it caught a real bug. The parser used to fall
+back to "first known city name appearing anywhere on the page", which read
+Wasalt's footer links — *Properties for Sale in Riyadh* — and filed an Ar Rass
+villa under Riyadh. **Ten of 53 listings, 19%, had the wrong city**, and every
+one of them would have surfaced in a Riyadh search. The city now comes only
+from the location line, a missing city is stored as `NULL` rather than
+guessed, and `--selftest` has a regression case built from that exact page.
+
+The remaining 10 price-per-sqm outliers are all Jeddah apartments where Wasalt
+publishes the building's built-up area rather than the unit's, plus one plot
+at 460,000 SAR per sqm. Those are reported and left exactly as published.
+Quietly "correcting" a source figure is how a dataset starts lying.
+
+Because the raw page text is kept alongside the parsed rows,
+`scrape.py --reparse` rebuilt all 53 listings from stored text after that fix,
+with no second crawl of either site.
 
 ## Running it
 

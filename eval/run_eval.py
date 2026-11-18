@@ -140,6 +140,15 @@ def audit() -> None:
         "round(price_sar / area_sqm) AS per_sqm FROM listings "
         "WHERE deal='sale' AND price_sar AND area_sqm "
         "AND (per_sqm < 500 OR per_sqm > 50000) ORDER BY per_sqm").fetchall()
+    # Every city we stored must appear on that listing's own page. Catches the
+    # class of bug where a parser picks a city out of footer navigation.
+    bad = [u for u, c, t in db.execute(
+        "SELECT l.url, l.city, d.text FROM listings l JOIN docs d "
+        "ON d.url = l.url WHERE l.city IS NOT NULL")
+        if c.split()[0].lower() not in " ".join(t.split()).lower()]
+    print(f"listings whose city is not on their own page: {len(bad)} "
+          f"({'clean' if not bad else 'CHECK THESE'})")
+
     print(f"price-per-sqm outliers from the source: {len(odd)}")
     for row in odd[:5]:
         print(f"   {row[0]} {row[1]}: {row[2]:,} SAR / {row[3]} sqm "

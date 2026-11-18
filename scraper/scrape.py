@@ -170,12 +170,17 @@ def parse_listing(url: str, title: str, text: str) -> dict:
         core = re.sub(r"\s+For (?:Sale|Rent)$", "", title).strip()
         where[0] = (where[0].split(core)[-1] if core and core in where[0]
                     else where[0])[-40:].strip()
-    city = next((c for c in CITIES if where and c in where[-1]), None)
-    if not city:
-        city = next((c for c in CITIES
-                     if re.search(rf"\bfor (?:Sale|Rent) in {c}\b", flat)), None)
-    if not city:
-        city = next((c for c in CITIES if c in flat), None)
+    # The last segment of that line IS the city, whether or not we have heard
+    # of it. An earlier version fell back to "first known city appearing
+    # anywhere in the page", which quietly read the footer's "Properties for
+    # Sale in Riyadh" links and filed an Ar Rass villa under Riyadh. A missing
+    # city is recoverable; a confidently wrong one corrupts every search.
+    city = where[-1] if where else None
+    if city:
+        city = re.sub(r"^(North|South|East|West)\s+", "", city).strip()
+        city = next((c for c in CITIES if c.lower() == city.lower()), city)
+    if not city or len(city) > 40:
+        city = None
 
     area = re.search(rf"({NUM})\s*(?:sqm|SQM)", flat)
     beds = (re.search(r"(\d+)\s*غرف نوم", flat)
@@ -220,6 +225,23 @@ def _selftest() -> None:
     assert r["bedrooms"] == 5, r["bedrooms"]
     assert r["area_sqm"] == 333, r["area_sqm"]
     assert r["ptype"] == "villa" and r["deal"] == "sale"
+
+    # Regression: this page's footer links to "Properties for Sale in Riyadh",
+    # and an earlier fallback scanned the whole page for a known city name and
+    # filed this Ar Rass villa under Riyadh. The location line is the only
+    # trustworthy source for the city.
+    rass = (
+        "Home Villa 550 SQM Facing South with 15 Bedrooms For Rent "
+        "Villa 550 SQM Facing South with 15 Bedrooms "
+        "Al Madinah, Ar RassMap view 15 غرف نوم 550 sqm "
+        "Properties for Sale in Riyadh Properties for Sale in Jeddah"
+    )
+    r2 = parse_listing("https://wasalt.sa/en/property/rent/villa-550-x-2",
+                       "Villa 550 SQM Facing South with 15 Bedrooms For Rent",
+                       rass)
+    assert r2["city"] == "Ar Rass", r2["city"]
+    assert r2["district"] == "Al Madinah", r2["district"]
+    assert r2["deal"] == "rent"
     print("parse_listing ok")
 
 
@@ -229,6 +251,30 @@ def save_doc(db, url, source, title, text):
     db.execute("DELETE FROM docs_fts WHERE url=?", (url,))
     db.execute("INSERT INTO docs_fts (url,title,text) VALUES (?,?,?)",
                (url, title, text))
+
+
+def reparse() -> None:
+    """Re-derive the listings table from text already stored in docs.
+
+    The raw page text is kept, so a parser fix does not mean re-crawling the
+    sites. Cheaper, and kinder to them.
+    """
+    db = sqlite3.connect(DB)
+    rows = db.execute(
+        "SELECT url, title, text FROM docs WHERE source='wasalt'").fetchall()
+    for url, title, text in rows:
+        db.execute(
+            "INSERT OR REPLACE INTO listings VALUES "
+            "(:url,:title,:deal,:ptype,:city,:district,:price_sar,"
+            ":bedrooms,:area_sqm,:price_per_sqm,:description)",
+            parse_listing(url, title, text))
+    db.commit()
+    cities = db.execute(
+        "SELECT city, count(*) FROM listings GROUP BY city ORDER BY 2 DESC"
+    ).fetchall()
+    print(f"reparsed {len(rows)} listings")
+    print("cities:", cities)
+    db.close()
 
 
 def run(site: str, limit: int, settle: float) -> None:
@@ -279,11 +325,15 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--site", choices=["wasalt", "darglobal"])
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--reparse", action="store_true",
+                    help="rebuild listings from stored page text")
     ap.add_argument("--limit", type=int, default=60)
     ap.add_argument("--settle", type=float, default=6.0,
                     help="seconds to let the page render (also our rate limit)")
     a = ap.parse_args()
     if a.selftest:
         _selftest()
+    elif a.reparse:
+        reparse()
     else:
         run(a.site, a.limit, a.settle)
