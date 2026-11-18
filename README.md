@@ -9,6 +9,7 @@ Live: **<DEPLOYED_URL>**
 scraper/scrape.py   real Chrome -> SQLite (listings + full-text pages)
 app/agent.py        LangGraph agent, two tools over that SQLite file
 app/server.py       FastAPI: GET / (UI), POST /chat, GET /health
+eval/run_eval.py    outcome-graded checks against the database
 Dockerfile          one image, serves on $PORT (7860 by default)
 ```
 
@@ -37,6 +38,31 @@ The LangGraph agent picks between `search_listings` (structured filter) and
 `search_pages` (keyword search) per question, and can call both. The response
 reports which tools ran, so a wrong answer can be traced to the retrieval step
 rather than guessed at.
+
+## How I know it works
+
+```bash
+OPENROUTER_API_KEY=sk-or-... python eval/run_eval.py
+python eval/run_eval.py --selftest      # graders only, no API calls
+```
+
+Every case is graded against the database rather than by another model, so a
+fluent wrong answer fails:
+
+| Check | What fails it |
+|---|---|
+| `grounding` | citing a URL that isn't in the scraped data |
+| `price_cap` | returning a listing above the ceiling the question set |
+| `refusal` | inventing listings for a city we hold no data for |
+| `routing` | answering a project question without searching the pages |
+
+The graders are pure functions over the reply and the database, so
+`--selftest` checks them without spending an API call — including that a
+trailing full stop doesn't turn a real URL into a reported hallucination.
+
+This matters more than it looks: an LLM grading another LLM agrees with
+confident prose, and confident prose about a price that doesn't exist is the
+failure mode that costs a property business real money.
 
 ## Running it
 
