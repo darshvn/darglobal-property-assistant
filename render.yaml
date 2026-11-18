@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: darglobal-property-assistant
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000          # Render routes to this port
+      - key: OPENROUTER_MODEL
+        value: inclusionai/ling-3.2-flash:free
+      - key: OPENROUTER_API_KEY
+        sync: false           # entered in the dashboard, never committed

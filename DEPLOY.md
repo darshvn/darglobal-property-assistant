@@ -33,15 +33,25 @@ That enables the APIs, puts the key in Secret Manager (so it is never baked
 into the image or passed on a command line), deploys, prints the public URL
 and health-checks it. Re-running it redeploys.
 
-## 2. Render — no card needed, but it sleeps
+## 2. Render — no card at all
 
-Free web services spin down after 15 minutes idle and take about a minute to
-wake. A reviewer who clicks the link cold waits through a loading screen,
-which is why this is second choice. Push the repo to GitHub, then on
-<https://dashboard.render.com> pick New → Web Service → the repo, runtime
-Docker, and add `OPENROUTER_API_KEY` as an environment variable.
+No payment method, Docker native, 512 MB RAM. Measured: this container idles
+at 87 MB and peaks at 92 MB under a live query, so it fits with room to spare.
 
-Wake it right before sending the email and it will be warm when they open it.
+`render.yaml` in this repo is a blueprint, so Render fills in the settings:
+
+1. Sign up at <https://dashboard.render.com> with the GitHub account, no card.
+2. New → **Blueprint**, pick `darshvn/darglobal-property-assistant`, and
+   authorise Render to read it (the repo is private).
+3. It reads `render.yaml` and asks for one value, `OPENROUTER_API_KEY`. Paste
+   it. It is marked `sync: false` so the key is never committed.
+4. First build takes a few minutes. The URL is
+   `https://darglobal-property-assistant.onrender.com`.
+
+**The catch:** free services spin down after 15 minutes idle and take about a
+minute to wake. Open the URL once just before emailing so it is warm, and say
+in the email that the first load may take a moment. A reviewer opening it days
+later still waits that minute, which is the price of no-card hosting.
 
 ## 3. cloudflared — works this minute, no account at all
 
