@@ -33,7 +33,15 @@ else
   printf '%s' "$OPENROUTER_API_KEY" | gcloud secrets create openrouter-key --data-file=-
 fi
 
-SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+# A dedicated identity whose only permission is reading this one secret.
+# The default compute service account is project Editor, so binding the key to
+# it would let anything else in the project read the key too.
+SA_NAME=darglobal-bot-run
+SA="$SA_NAME@$PROJECT.iam.gserviceaccount.com"
+gcloud iam service-accounts describe "$SA" >/dev/null 2>&1 || \
+  gcloud iam service-accounts create "$SA_NAME" \
+    --display-name="DarGlobal bot (Cloud Run runtime)"
+
 gcloud secrets add-iam-policy-binding openrouter-key \
   --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor >/dev/null
 
@@ -42,6 +50,7 @@ gcloud run deploy "$SERVICE" \
   --source . \
   --region "$REGION" \
   --allow-unauthenticated \
+  --service-account "$SA" \
   --memory 1Gi \
   --cpu 1 \
   --min-instances 0 \
