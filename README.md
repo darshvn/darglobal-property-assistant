@@ -3,7 +3,10 @@
 A chatbot that answers questions about DarGlobal developments and Wasalt
 property listings, using only data scraped from the two public sites.
 
-Live: **<DEPLOYED_URL>**
+Live: **<https://darglobal-property-assistant.onrender.com>**
+
+Hosted on Render's free tier, so it sleeps after 15 minutes idle. The first
+request after a sleep takes about a minute to wake the container.
 
 ```
 scraper/scrape.py   real Chrome -> SQLite (listings + full-text pages)
