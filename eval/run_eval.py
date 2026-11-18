@@ -159,8 +159,7 @@ def main() -> int:
 
     failures = 0
     for case in CASES:
-        out = agent.invoke({"messages": [HumanMessage(case["ask"])]},
-                           {"recursion_limit": 12})
+        out, served_by = agent([HumanMessage(case["ask"])])
         reply = out["messages"][-1].content
         tools = [c["name"] for m in out["messages"]
                  for c in getattr(m, "tool_calls", []) or []]
@@ -168,7 +167,8 @@ def main() -> int:
                                 prices=prices, cap=case.get("cap", 0),
                                 expect=case.get("expect", ""))
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  {case['name']:<18} {why}")
+        print(f"{'PASS' if ok else 'FAIL'}  {case['name']:<18} {why}"
+              f"   [{served_by}]")
         if not ok:
             print(f"      asked: {case['ask']}\n      got:   {reply[:200]}")
 

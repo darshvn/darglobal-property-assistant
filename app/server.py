@@ -1,5 +1,6 @@
 """FastAPI wrapper around the LangGraph agent."""
 
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -36,6 +37,16 @@ def health() -> dict:
     return {"ok": True, "model": MODEL, "db": DB.exists()}
 
 
+@app.get("/stats")
+def stats() -> dict:
+    """What the index actually holds, shown in the header."""
+    import sqlite3
+    with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as db:
+        pages = db.execute("SELECT count(*) FROM docs").fetchone()[0]
+        listings = db.execute("SELECT count(*) FROM listings").fetchone()[0]
+    return {"pages": pages, "listings": listings}
+
+
 @app.post("/chat")
 def chat(ask: Ask) -> dict:
     global _agent
@@ -47,18 +58,37 @@ def chat(ask: Ask) -> dict:
     msgs.append(HumanMessage(ask.message))
 
     try:
-        out = _agent.invoke({"messages": msgs}, {"recursion_limit": 12})
+        out, served_by = _agent(msgs)
     except Exception as exc:                      # noqa: BLE001
-        # Free OpenRouter models rate-limit hard; surface that instead of a 500.
         detail = str(exc)
         if "429" in detail or "rate" in detail.lower():
-            return {"reply": "The free model is rate-limited right now. "
-                              "Wait a few seconds and try again.", "tools": []}
-        return {"reply": f"Upstream error: {detail[:300]}", "tools": []}
+            return {"reply": "Every model provider is rate-limited at the "
+                             "moment. Try again in a few seconds.",
+                    "tools": [], "listings": [], "model": None}
+        return {"reply": f"Upstream error: {detail[:300]}",
+                "tools": [], "listings": [], "model": None}
 
     used = [c["name"] for m in out["messages"]
             for c in getattr(m, "tool_calls", []) or []]
-    return {"reply": out["messages"][-1].content, "tools": used}
+
+    # search_listings answers in JSON, so the exact rows the model reasoned
+    # over are handed to the UI as cards. Nothing is re-queried or re-parsed
+    # out of the prose, so a card can never disagree with the answer.
+    listings, seen = [], set()
+    for m in out["messages"]:
+        if getattr(m, "name", None) != "search_listings":
+            continue
+        try:
+            rows = json.loads(m.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get("url") not in seen:
+                seen.add(row["url"])
+                listings.append(row)
+
+    return {"reply": out["messages"][-1].content, "tools": used,
+            "listings": listings[:12], "model": served_by}
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ Riyadh under 2M"), and a WHERE clause answers those exactly, where embeddings
 only answer them approximately. FTS5 covers the prose half.
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -34,12 +35,18 @@ properties on sale or rent (prices, sizes, bedrooms, cities). Call \
 search_pages for DarGlobal projects, brand partners, locations and company \
 information.
 
+search_listings returns JSON rows. The interface renders those as property \
+cards on its own, so do not repeat every field in prose.
+
 Rules:
 - Never invent a price, size or project. If the tools return nothing, say so \
 and suggest what you can search instead.
 - Quote prices with their currency: Wasalt listings are in SAR.
-- Keep answers short. Use a compact list when showing more than two properties.
-- Include the source URL for anything you quote."""
+- When listings come back, write one or two sentences about them (the range, \
+what stands out) and let the cards carry the detail. Do not list every \
+property as a bullet with its URL.
+- For page content, answer in short prose and cite the source URL.
+- Never call the same tool twice with the same arguments."""
 
 
 def _connect() -> sqlite3.Connection:
@@ -82,12 +89,9 @@ def search_listings(city: str = "", deal: str = "", property_type: str = "",
         rows = db.execute(sql, [*args, min(limit, 20)]).fetchall()
     if not rows:
         return "No listings matched. Try a wider price range or another city."
-    return "\n".join(
-        f"- {r['title']} | {r['ptype']} for {r['deal']} | "
-        f"{r['district'] or '?'}, {r['city'] or '?'} | "
-        f"{r['price_sar'] or '?'} SAR | {r['bedrooms'] or '?'} bed | "
-        f"{r['area_sqm'] or '?'} sqm | {r['url']}"
-        for r in rows)
+    # JSON, so the same rows the model reasons over can be rendered as cards
+    # in the UI without the server re-running or re-parsing the query.
+    return json.dumps([dict(r) for r in rows], ensure_ascii=False)
 
 
 @tool
@@ -117,19 +121,81 @@ def search_pages(query: str, limit: int = 4) -> str:
     return "\n\n".join(f"[{r['title']}] {r['s']}\n{r['url']}" for r in rows)
 
 
-def build_agent():
+TOOLS = [search_listings, search_pages]
+
+# Free models rate-limit hard, and a demo that answers "try again later" is a
+# broken demo. So we keep an ordered list of providers and walk down it the
+# moment one refuses. Fireworks is last because it costs credit; it only runs
+# when every free option is exhausted.
+FALLBACKS = os.getenv(
+    "OPENROUTER_FALLBACKS",
+    "nvidia/nemotron-3-ultra-550b-a55b:free,"   # 550B, 1M context
+    "google/gemma-4-31b-it:free,"
+    "baidu/ernie-5.5-flash-preview:free,"
+    "nvidia/nemotron-3.5-lightning:free,"
+    "cohere/north-mini-code:free",
+)
+FIREWORKS_MODEL = os.getenv(
+    "FIREWORKS_MODEL", "accounts/fireworks/models/qwen3-235b-a22b-instruct")
+
+
+def _providers() -> list[tuple[str, str, str]]:
+    """(label, model, base_url, key) chain, in the order we try them."""
+    chain = []
     key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
-    llm = ChatOpenAI(
-        model=MODEL,
-        api_key=key,
-        base_url="https://openrouter.ai/api/v1",
-        temperature=0,
-        timeout=60,
-    )
-    return create_react_agent(llm, [search_listings, search_pages],
-                              prompt=SYSTEM)
+    if key:
+        openrouter = "https://openrouter.ai/api/v1"
+        chain.append((f"openrouter:{MODEL}", MODEL, openrouter, key))
+        for m in (m.strip() for m in FALLBACKS.split(",") if m.strip()):
+            chain.append((f"openrouter:{m}", m, openrouter, key))
+    fw = os.environ.get("FIREWORKS_API_KEY")
+    if fw:
+        chain.append((f"fireworks:{FIREWORKS_MODEL}", FIREWORKS_MODEL,
+                      "https://api.fireworks.ai/inference/v1", fw))
+    if not chain:
+        raise RuntimeError("set OPENROUTER_API_KEY or FIREWORKS_API_KEY")
+    return chain
+
+
+def _agent_for(model: str, base_url: str, key: str):
+    llm = ChatOpenAI(model=model, api_key=key, base_url=base_url,
+                     temperature=0, timeout=60)
+    return create_react_agent(llm, TOOLS, prompt=SYSTEM)
+
+
+def build_agent():
+    """One agent per provider, built lazily and reused."""
+    cache: dict[str, object] = {}
+
+    def run(messages, config=None):
+        last = None
+        skip_prefix = None
+        for label, model, base_url, key in _providers():
+            if skip_prefix and label.startswith(skip_prefix):
+                continue
+            if label not in cache:
+                cache[label] = _agent_for(model, base_url, key)
+            try:
+                out = cache[label].invoke({"messages": messages},
+                                          config or {"recursion_limit": 12})
+                return out, label
+            except Exception as exc:                      # noqa: BLE001
+                detail = str(exc)
+                last = exc
+                # OpenRouter's free quota is per account per day, not per
+                # model, so once it is spent every other free model on that
+                # key is spent too. Jump providers instead of burning calls.
+                if "free-models-per-day" in detail:
+                    skip_prefix = label.split(":")[0]
+                    continue
+                # Otherwise only a capacity refusal is worth another provider;
+                # a malformed request would fail identically everywhere.
+                if not any(s in detail for s in ("429", "502", "503")) and \
+                        "rate" not in detail.lower():
+                    raise
+        raise last                                        # every one refused
+
+    return run
 
 
 if __name__ == "__main__":
