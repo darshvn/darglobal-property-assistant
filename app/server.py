@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -16,8 +17,8 @@ _agent = None
 
 
 class Turn(BaseModel):
-    role: str
-    content: str
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=2000)
 
 
 class Ask(BaseModel):

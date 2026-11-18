@@ -66,14 +66,36 @@ SAMPLES.forEach(s => {
   document.getElementById('chips').append(b);
 });
 
-const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const linkify = s => esc(s).replace(/https?:\/\/[^\s<)]+/g,
-  u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+// The reply text originates in scraped third-party pages, so it is never
+// trusted: links are built as DOM nodes and everything else stays a text
+// node. No innerHTML anywhere on this path.
+function render(el, text) {
+  el.textContent = '';
+  let last = 0;
+  for (const m of String(text).matchAll(/https?:\/\/[^\s<>")\]]+/g)) {
+    el.append(text.slice(last, m.index));
+    let ok = false;
+    try { ok = ['http:', 'https:'].includes(new URL(m[0]).protocol); } catch {}
+    if (ok) {
+      const a = document.createElement('a');
+      a.href = m[0];
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = m[0];
+      el.append(a);
+    } else {
+      el.append(m[0]);
+    }
+    last = m.index + m[0].length;
+  }
+  el.append(text.slice(last));
+  return el;
+}
 
-function add(text, cls, html) {
+function add(text, cls, withLinks) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
-  if (html) d.innerHTML = linkify(text); else d.textContent = text;
+  if (withLinks) render(d, text); else d.textContent = text;
   log.append(d);
   d.scrollIntoView({block:'end'});
   return d;
@@ -94,7 +116,7 @@ f.onsubmit = async e => {
       body: JSON.stringify({message: text, history})
     });
     const data = await r.json();
-    pending.innerHTML = linkify(data.reply || '(empty reply)');
+    render(pending, data.reply || '(empty reply)');
     if (data.tools?.length) {
       const t = document.createElement('div');
       t.className = 'tools';
