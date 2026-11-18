@@ -20,7 +20,10 @@ from langgraph.prebuilt import create_react_agent
 
 DB = Path(os.getenv("DB_PATH", Path(__file__).resolve().parent.parent
                     / "data" / "properties.db"))
-MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
+# Free models that expose tool calling vary in how much capacity they have.
+# Gemma was the obvious pick on paper and returns 429 almost every call;
+# ling-3.2-flash answers reliably and has a 1M context window.
+MODEL = os.getenv("OPENROUTER_MODEL", "inclusionai/ling-3.2-flash:free")
 
 SYSTEM = """You are the property assistant for DarGlobal, a London-listed \
 luxury real estate developer, and its advertising partner Wasalt, a Saudi \
