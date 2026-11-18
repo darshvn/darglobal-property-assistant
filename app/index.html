@@ -30,7 +30,9 @@
     color:var(--faint);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase}
   .prov b{color:var(--gold);font-weight:600;font-variant-numeric:tabular-nums}
 
-  #log{padding:28px 0 4px}
+  /* Leaves room for the sticky composer so the last line never hides behind it. */
+  #log{padding:28px 0 4px;scroll-padding-bottom:140px}
+  main{padding-bottom:120px}
   .turn{margin-bottom:26px;animation:rise .32s ease both}
   @keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
   .who{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
@@ -257,7 +259,8 @@ function turn(who, cls){
   const d=document.createElement('div'); d.className='turn '+cls;
   const w=document.createElement('div'); w.className='who'; w.textContent=who;
   const b=document.createElement('div'); b.className='body';
-  d.append(w,b); log.append(d); d.scrollIntoView({block:'end',behavior:'smooth'});
+  d.append(w,b); log.append(d);
+  d.scrollIntoView({block:'start',behavior:'smooth'});
   return b;
 }
 
@@ -292,7 +295,7 @@ f.onsubmit=async e=>{
     body.textContent='Request failed: '+err.message;
   }finally{
     send.disabled=false; q.focus();
-    body.scrollIntoView({block:'end',behavior:'smooth'});
+    // composer has its own padding below, so nothing is hidden
   }
 };
 q.focus();
