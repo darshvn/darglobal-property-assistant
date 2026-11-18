@@ -56,21 +56,42 @@ CREATE TABLE IF NOT EXISTS listings (
 """
 
 
-def browser(*args: str, timeout: int = 75) -> str:
-    """Run one agent-browser command. Empty string on timeout.
+TAB = "dgscrape"   # our own labelled tab, so we never grab someone else's
 
-    `open` blocks until the page settles, and a heavy listing page can sit
-    there well past a minute, so a hang is normal rather than fatal — the
-    caller retries or moves on.
+
+def browser(*args: str, timeout: int = 75) -> str:
+    """Run one agent-browser command against our pinned tab.
+
+    Empty string on timeout. `open` blocks until the page settles, and a heavy
+    listing page can sit there well past a minute, so a hang is normal rather
+    than fatal — the caller retries or moves on.
+
+    --pin-tab makes a command fail instead of falling back to whatever tab
+    happens to be in front. Without it, a long scrape hijacks the browser from
+    anything else using it, and silently reads the wrong page when something
+    else steals focus.
     """
     try:
         out = subprocess.run(
-            ["agent-browser", "--cdp", "9222", *args],
+            ["agent-browser", "--cdp", "9222", "--pin-tab", *args],
             capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return ""
     return out.stdout.strip()
+
+
+def open_tab() -> None:
+    """Create (or re-attach to) the scraper's own tab and pin the session."""
+    listing = subprocess.run(
+        ["agent-browser", "--cdp", "9222", "tab", "list"],
+        capture_output=True, text=True, timeout=60).stdout
+    if TAB not in listing:
+        subprocess.run(["agent-browser", "--cdp", "9222",
+                        "tab", "new", "--label", TAB, "about:blank"],
+                       capture_output=True, text=True, timeout=60)
+    subprocess.run(["agent-browser", "--cdp", "9222", "--pin-tab", "tab", TAB],
+                   capture_output=True, text=True, timeout=60)
 
 
 DEAD = ("Error code: 404", "can’t seem to find the page",
@@ -214,6 +235,7 @@ def run(site: str, limit: int, settle: float) -> None:
     DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB)
     db.executescript(SCHEMA)
+    open_tab()
 
     if site == "darglobal":
         targets = ["https://darglobal.co.uk" + p for p in DARGLOBAL_PAGES]
