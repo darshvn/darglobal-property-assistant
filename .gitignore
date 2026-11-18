@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 data/scrape.log
 .env
+data/scrape-dg.log
+data/*.log
