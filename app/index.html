@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DarGlobal Property Assistant</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--txt:#e8eaed;--dim:#9aa3b2;--gold:#c9a227;--user:#1d2430}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 16px;border-bottom:1px solid var(--line)}
+  .wrap{max-width:780px;margin:0 auto;padding:0 16px}
+  h1{margin:0;font-size:17px;letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+  h1 span{color:var(--gold)}
+  .sub{color:var(--dim);font-size:13px;margin-top:4px}
+  #log{padding:20px 0 8px;min-height:50vh}
+  .msg{margin:0 0 14px;padding:11px 14px;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .me{background:var(--user);margin-left:auto;max-width:85%}
+  .bot{background:var(--panel);border:1px solid var(--line)}
+  .bot a{color:var(--gold)}
+  .tools{color:var(--dim);font-size:12px;margin:-8px 0 14px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 18px}
+  .chips button{background:var(--panel);border:1px solid var(--line);color:var(--dim);
+    border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+  .chips button:hover{border-color:var(--gold);color:var(--txt)}
+  form{position:sticky;bottom:0;background:var(--bg);display:flex;gap:8px;
+    padding:12px 0 18px;border-top:1px solid var(--line)}
+  input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);
+    border-radius:9px;padding:12px 14px;font-size:15px}
+  input:focus{outline:none;border-color:var(--gold)}
+  button[type=submit]{background:var(--gold);color:#1a1405;border:0;border-radius:9px;
+    padding:0 20px;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>Dar<span>Global</span> · Property Assistant</h1>
+  <div class="sub">Answers from scraped DarGlobal project pages and Wasalt listings.</div>
+</div></header>
+
+<main class="wrap">
+  <div id="log"></div>
+  <div class="chips" id="chips"></div>
+  <form id="f">
+    <input id="q" autocomplete="off" placeholder="Ask about a project or a listing…">
+    <button type="submit" id="send">Ask</button>
+  </form>
+</main>
+
+<script>
+const log = document.getElementById('log'), f = document.getElementById('f'),
+      q = document.getElementById('q'), send = document.getElementById('send');
+let history = [];
+
+const SAMPLES = [
+  'Which countries does DarGlobal build in?',
+  'Show villas in Riyadh under 2 million SAR',
+  'What is the Trump Organization partnership?',
+  'Any 4-bedroom properties for rent?'
+];
+SAMPLES.forEach(s => {
+  const b = document.createElement('button');
+  b.textContent = s;
+  b.onclick = () => { q.value = s; f.requestSubmit(); };
+  document.getElementById('chips').append(b);
+});
+
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const linkify = s => esc(s).replace(/https?:\/\/[^\s<)]+/g,
+  u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+
+function add(text, cls, html) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  if (html) d.innerHTML = linkify(text); else d.textContent = text;
+  log.append(d);
+  d.scrollIntoView({block:'end'});
+  return d;
+}
+
+f.onsubmit = async e => {
+  e.preventDefault();
+  const text = q.value.trim();
+  if (!text) return;
+  q.value = ''; send.disabled = true;
+  add(text, 'me');
+  const pending = add('…', 'bot');
+
+  try {
+    const r = await fetch('/chat', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({message: text, history})
+    });
+    const data = await r.json();
+    pending.innerHTML = linkify(data.reply || '(empty reply)');
+    if (data.tools?.length) {
+      const t = document.createElement('div');
+      t.className = 'tools';
+      t.textContent = 'called: ' + [...new Set(data.tools)].join(', ');
+      log.append(t);
+    }
+    history.push({role:'user', content:text},
+                 {role:'assistant', content:data.reply || ''});
+    history = history.slice(-10);
+  } catch (err) {
+    pending.textContent = 'Request failed: ' + err.message;
+  } finally {
+    send.disabled = false; q.focus();
+  }
+};
+q.focus();
+</script>
+</body>
+</html>
