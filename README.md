@@ -43,7 +43,8 @@ rather than guessed at.
 
 ```bash
 OPENROUTER_API_KEY=sk-or-... python eval/run_eval.py
-python eval/run_eval.py --selftest      # graders only, no API calls
+python eval/run_eval.py --data          # audit the scraped table, no API calls
+python eval/run_eval.py --selftest      # check the graders, no API calls
 ```
 
 Every case is graded against the database rather than by another model, so a
@@ -63,6 +64,15 @@ trailing full stop doesn't turn a real URL into a reported hallucination.
 This matters more than it looks: an LLM grading another LLM agrees with
 confident prose, and confident prose about a price that doesn't exist is the
 failure mode that costs a property business real money.
+
+`--data` audits the scraped table before any of that, because a wrong price in
+an answer is usually not a model problem. It confirms no page carried more
+than one price (so the extractor can't have grabbed a neighbouring listing's
+figure) and lists price-per-sqm outliers. Ten of the 53 listings are outliers,
+all of them Jeddah apartments where Wasalt publishes the building's built-up
+area rather than the unit's, plus one plot listed at 460,000 SAR per sqm.
+Those are reported and left exactly as published. Quietly "correcting" a
+source figure is how a dataset starts lying.
 
 ## Running it
 

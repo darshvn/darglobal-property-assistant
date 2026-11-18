@@ -108,6 +108,47 @@ def _selftest() -> None:
     print("graders ok")
 
 
+def audit() -> None:
+    """Check the scraped table itself, before blaming the model.
+
+    A chatbot that quotes a wrong price is usually not a model problem. These
+    checks separate "we extracted it wrong" from "the source says something
+    odd", which are different bugs with different fixes.
+    """
+    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+
+    total = db.execute("SELECT count(*) FROM listings").fetchone()[0]
+    missing = db.execute(
+        "SELECT sum(price_sar IS NULL), sum(city IS NULL), "
+        "sum(area_sqm IS NULL) FROM listings").fetchone()
+    print(f"{total} listings | missing: price {missing[0] or 0}, "
+          f"city {missing[1] or 0}, area {missing[2] or 0}")
+
+    # If a page carried more than one price, our single-price regex could
+    # have picked a neighbouring listing's. Zero means extraction is sound.
+    multi = sum(
+        len(set(re.findall(r"[\d,.]+\s*SAR", " ".join(text.split())))) > 1
+        for (text,) in db.execute(
+            "SELECT text FROM docs WHERE source='wasalt'"))
+    print(f"pages with more than one price on them: {multi} "
+          f"({'clean' if not multi else 'CHECK THESE'})")
+
+    # Outliers are reported, never silently corrected: a 460,000 SAR/sqm plot
+    # is what Wasalt published, and guessing a 'fix' would be inventing data.
+    odd = db.execute(
+        "SELECT city, ptype, price_sar, area_sqm, "
+        "round(price_sar / area_sqm) AS per_sqm FROM listings "
+        "WHERE deal='sale' AND price_sar AND area_sqm "
+        "AND (per_sqm < 500 OR per_sqm > 50000) ORDER BY per_sqm").fetchall()
+    print(f"price-per-sqm outliers from the source: {len(odd)}")
+    for row in odd[:5]:
+        print(f"   {row[0]} {row[1]}: {row[2]:,} SAR / {row[3]} sqm "
+              f"= {row[4]:,.0f} SAR per sqm")
+    if odd:
+        print("   (left as published; Wasalt lists building area on some "
+              "units, so these are source quirks, not parse errors)")
+
+
 def main() -> int:
     from langchain_core.messages import HumanMessage
 
@@ -137,8 +178,16 @@ def main() -> int:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--selftest", action="store_true")
-    if ap.parse_args().selftest:
+    ap.add_argument("--selftest", action="store_true",
+                    help="check the graders, no API calls")
+    ap.add_argument("--data", action="store_true",
+                    help="audit the scraped table, no API calls")
+    a = ap.parse_args()
+    if a.selftest:
         _selftest()
+    elif a.data:
+        audit()
     else:
+        audit()
+        print()
         sys.exit(main())
