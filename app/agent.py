@@ -138,20 +138,47 @@ FALLBACKS = os.getenv(
 FIREWORKS_MODEL = os.getenv(
     "FIREWORKS_MODEL", "accounts/fireworks/models/qwen3-235b-a22b-instruct")
 
+# Last resort, and the only one that costs anything. The brief asked for a
+# free model, and the primary is one; but OpenRouter's free allowance is 50
+# requests a day per account until $10 of credit is bought, which a reviewer
+# clicking through a demo can exhaust in one sitting. So a paid model sits
+# behind the free ones: ~$0.0016 a conversation, and about twice as fast.
+PAID_MODEL = os.getenv("OPENROUTER_PAID_MODEL", "deepseek/deepseek-v4-flash")
 
-def _providers() -> list[tuple[str, str, str]]:
-    """(label, model, base_url, key) chain, in the order we try them."""
+
+OPENROUTER = "https://openrouter.ai/api/v1"
+
+
+def _providers() -> list[tuple[str, str, str, str, str]]:
+    """(label, model, base_url, key, bucket) in the order we try them.
+
+    `bucket` groups everything that shares one quota. OpenRouter's free
+    allowance is per account per day, so every model on one key empties
+    together; a second key is a second allowance.
+    """
     chain = []
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        openrouter = "https://openrouter.ai/api/v1"
-        chain.append((f"openrouter:{MODEL}", MODEL, openrouter, key))
-        for m in (m.strip() for m in FALLBACKS.split(",") if m.strip()):
-            chain.append((f"openrouter:{m}", m, openrouter, key))
+    models = [MODEL] + [m.strip() for m in FALLBACKS.split(",") if m.strip()]
+
+    for n, var in enumerate(("OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"), 1):
+        key = os.environ.get(var)
+        if not key:
+            continue
+        for m in models:
+            chain.append((f"openrouter{n}:{m}", m, OPENROUTER, key, f"or{n}"))
+
     fw = os.environ.get("FIREWORKS_API_KEY")
     if fw:
         chain.append((f"fireworks:{FIREWORKS_MODEL}", FIREWORKS_MODEL,
-                      "https://api.fireworks.ai/inference/v1", fw))
+                      "https://api.fireworks.ai/inference/v1", fw, "fw"))
+
+    # Paid, so it sits behind every free option and every free account.
+    if PAID_MODEL:
+        for n, var in enumerate(("OPENROUTER_API_KEY",
+                                 "OPENROUTER_API_KEY_2"), 1):
+            key = os.environ.get(var)
+            if key:
+                chain.append((f"paid{n}:{PAID_MODEL}", PAID_MODEL,
+                              OPENROUTER, key, f"paid{n}"))
     if not chain:
         raise RuntimeError("set OPENROUTER_API_KEY or FIREWORKS_API_KEY")
     return chain
@@ -169,9 +196,9 @@ def build_agent():
 
     def run(messages, config=None):
         last = None
-        skip_prefix = None
-        for label, model, base_url, key in _providers():
-            if skip_prefix and label.startswith(skip_prefix):
+        spent: set[str] = set()
+        for label, model, base_url, key, bucket in _providers():
+            if bucket in spent:
                 continue
             if label not in cache:
                 cache[label] = _agent_for(model, base_url, key)
@@ -182,18 +209,19 @@ def build_agent():
             except Exception as exc:                      # noqa: BLE001
                 detail = str(exc)
                 last = exc
-                # OpenRouter's free quota is per account per day, not per
-                # model, so once it is spent every other free model on that
-                # key is spent too. Jump providers instead of burning calls.
+                # The daily free allowance belongs to the account, not the
+                # model, so once it is gone every other model on that key is
+                # gone too. Retire the whole bucket rather than burning five
+                # more calls proving it.
                 if "free-models-per-day" in detail:
-                    skip_prefix = label.split(":")[0]
+                    spent.add(bucket)
                     continue
-                # Otherwise only a capacity refusal is worth another provider;
-                # a malformed request would fail identically everywhere.
+                # Otherwise only a capacity refusal is worth moving on; a
+                # malformed request would fail identically everywhere.
                 if not any(s in detail for s in ("429", "502", "503")) and \
                         "rate" not in detail.lower():
                     raise
-        raise last                                        # every one refused
+        raise last                                        # everything refused
 
     return run
 
