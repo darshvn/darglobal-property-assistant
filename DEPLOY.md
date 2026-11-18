@@ -10,28 +10,28 @@ docker build -t darglobal-bot .
 ## 1. Google Cloud Run — the one to use
 
 Cold start is a couple of seconds, it scales to zero, and the free tier
-(2M requests a month) will never be touched by a hiring review. A card is
-required to open the account; the free tier does not charge.
+(2M requests a month) will never be touched by a hiring review.
+
+Already done: SDK installed, signed in as darshanpatil15105@gmail.com, project
+`darglobal-bot-2026` created, region `asia-south1`.
+
+Still needed, once only: **link a billing account to the project.** Cloud Run
+will not enable its APIs without one, even to stay inside the free tier.
+
+  <https://console.cloud.google.com/billing/linkedaccount?project=darglobal-bot-2026>
+
+The existing billing account on this login is closed, so it needs reopening or
+replacing with a new one.
+
+Then:
 
 ```bash
-brew install --cask google-cloud-sdk
-gcloud init                                   # sign in, create a project
-gcloud run deploy darglobal-bot \
-  --source . \
-  --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars OPENROUTER_MODEL=inclusionai/ling-3.2-flash:free \
-  --set-secrets OPENROUTER_API_KEY=openrouter-key:latest
+./deploy.sh
 ```
 
-Create the secret first:
-
-```bash
-gcloud secrets create openrouter-key --data-file=- <<< "$OPENROUTER_API_KEY"
-```
-
-Cloud Run gives back a `https://darglobal-bot-xxxx.a.run.app` URL. That is the
-one to send.
+That enables the APIs, puts the key in Secret Manager (so it is never baked
+into the image or passed on a command line), deploys, prints the public URL
+and health-checks it. Re-running it redeploys.
 
 ## 2. Render — no card needed, but it sleeps
 
