@@ -242,8 +242,15 @@ def run(site: str, limit: int, settle: float) -> None:
     else:
         targets = sitemap_urls(limit)
 
+    # A page costs ~25s, so never pay for one twice. Interrupted runs are
+    # normal here: the browser is shared, and the scrape takes an hour.
+    done = {r[0] for r in db.execute("SELECT url FROM docs")}
+
     ok = skipped = 0
     for i, url in enumerate(targets, 1):
+        if url in done:
+            print(f"[{i}/{len(targets)}] have it already")
+            continue
         page = load_page(url, settle)
         if not page:
             skipped += 1
